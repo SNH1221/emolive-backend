@@ -1,62 +1,53 @@
 from fastapi import FastAPI, UploadFile, File, Form
-from deepface import DeepFace
-import cv2
-import numpy as np
 import requests
 import os
+import base64
 
 app = FastAPI()
 
 HF_TOKEN = os.getenv("HF_TOKEN")
 
+TEXT_MODEL = "j-hartmann/emotion-english-distilroberta-base"
+FACE_MODEL = "dima806/facial_emotions_image_detection"
+
+HEADERS = {
+    "Authorization": f"Bearer {HF_TOKEN}"
+}
+
 @app.get("/")
-def home():
-    return {"message": "EmoLive Backend Running 🚀"}
+def root():
+    return {"message": "EmoLive Backend Running"}
 
+# ---------------- TEXT EMOTION ----------------
 
-# =========================
-# FACE EMOTION DETECTION
-# =========================
-@app.post("/detect-face-emotion")
-async def detect_face_emotion(file: UploadFile = File(...)):
-
-    contents = await file.read()
-    npimg = np.frombuffer(contents, np.uint8)
-    img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
-
-    result = DeepFace.analyze(
-        img,
-        actions=['emotion'],
-        enforce_detection=False
-    )
-
-    emotion_data = result[0]
-
-    return {
-        "dominant_emotion": emotion_data["dominant_emotion"],
-        "emotion_scores": emotion_data["emotion"]
-    }
-
-
-# =========================
-# TEXT EMOTION DETECTION
-# =========================
 @app.post("/detect-text-emotion")
 async def detect_text_emotion(text: str = Form(...)):
+    url = f"https://router.huggingface.co/hf-inference/models/{TEXT_MODEL}"
 
-    API_URL = "https://router.huggingface.co/hf-inference/models/j-hartmann/emotion-english-distilroberta-base"
-
-    headers = {
-        "Authorization": f"Bearer {HF_TOKEN}"
-    }
-
-    payload = {
-        "inputs": text
-    }
-
-    response = requests.post(API_URL, headers=headers, json=payload)
+    response = requests.post(
+        url,
+        headers=HEADERS,
+        json={"inputs": text}
+    )
 
     return {
         "text": text,
         "emotions": response.json()
     }
+
+# ---------------- FACE EMOTION ----------------
+
+@app.post("/detect-face-emotion")
+async def detect_face_emotion(file: UploadFile = File(...)):
+    contents = await file.read()
+    base64_image = base64.b64encode(contents).decode("utf-8")
+
+    url = f"https://router.huggingface.co/hf-inference/models/{FACE_MODEL}"
+
+    response = requests.post(
+        url,
+        headers=HEADERS,
+        json={"inputs": base64_image}
+    )
+
+    return response.json()

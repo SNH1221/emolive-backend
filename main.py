@@ -1,24 +1,29 @@
 from fastapi import FastAPI, Form
-from transformers import pipeline
+import requests
+import os
 
 app = FastAPI()
 
-# Load text emotion model
-emotion_pipeline = pipeline(
-    "text-classification",
-    model="j-hartmann/emotion-english-distilroberta-base",
-    return_all_scores=True
-)
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+API_URL = "https://api-inference.huggingface.co/models/j-hartmann/emotion-english-distilroberta-base"
+
+headers = {
+    "Authorization": f"Bearer {HF_TOKEN}"
+}
 
 @app.get("/")
 def home():
-    return {"message": "EmoLive Backend Running 🚀"}
+    return {"message": "EmoLive Backend Running"}
 
 @app.post("/detect-text-emotion")
-async def detect_text_emotion(text: str = Form(...)):
-    result = emotion_pipeline(text)
+def detect_text_emotion(text: str = Form(...)):
+
+    payload = {"inputs": text}
+
+    response = requests.post(API_URL, headers=headers, json=payload)
 
     return {
         "text": text,
-        "emotions": result[0]
+        "emotions": response.json()
     }

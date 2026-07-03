@@ -7,7 +7,7 @@ app = FastAPI()
 
 HF_TOKEN = os.getenv("HF_TOKEN")
 
-TEXT_MODEL = "SamLowe/roberta-base-go_emotions"
+TEXT_MODEL = "j-hartmann/emotion-english-distilroberta-base"
 SARCASM_MODEL = "cardiffnlp/twitter-roberta-base-irony"
 FACE_MODEL = "dima806/facial_emotions_image_detection"
 

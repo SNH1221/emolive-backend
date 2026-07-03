@@ -49,7 +49,7 @@ async def detect_text_emotion(text: str = Form(...)):
         if isinstance(sarcasm_raw, list):
             sarcasm_data = sarcasm_raw[0] if isinstance(sarcasm_raw[0], list) else sarcasm_raw
             for item in sarcasm_data:
-                if item["label"].lower() in ["irony", "sarcasm"] and item["score"] > 0.6:
+                if item["label"].lower() in ["irony", "sarcasm"] and item["score"] > 0.85:
                     is_sarcastic = True
                     break
     except:

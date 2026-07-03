@@ -17,7 +17,6 @@ HEADERS = {
 
 ALL_EMOTIONS = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
 
-# Sarcasm hone pe emotion flip karo
 SARCASM_FLIP = {
     "joy": "disgust",
     "disgust": "joy",
@@ -32,8 +31,6 @@ SARCASM_FLIP = {
 def root():
     return {"message": "EmoLive Backend Running"}
 
-# ---------------- TEXT EMOTION ----------------
-
 @app.post("/detect-text-emotion")
 async def detect_text_emotion(text: str = Form(...)):
 
@@ -45,7 +42,10 @@ async def detect_text_emotion(text: str = Form(...)):
         json={"inputs": text}
     )
     sarcasm_raw = sarcasm_response.json()
-    
+
+    # DEBUG LOGS
+    print(f"Sarcasm raw response: {sarcasm_raw}")
+
     is_sarcastic = False
     try:
         if isinstance(sarcasm_raw, list):
@@ -56,6 +56,9 @@ async def detect_text_emotion(text: str = Form(...)):
                     break
     except:
         is_sarcastic = False
+
+    # DEBUG LOGS
+    print(f"Is sarcastic: {is_sarcastic}")
 
     # Step 2 — Emotion detect
     emotion_url = f"https://router.huggingface.co/hf-inference/models/{TEXT_MODEL}"
@@ -83,11 +86,9 @@ async def detect_text_emotion(text: str = Form(...)):
 
         all_scores.sort(key=lambda x: x["score"], reverse=True)
 
-        # Step 3 — Sarcasm hone pe top emotion flip karo
         if is_sarcastic:
             top_label = all_scores[0]["label"]
             flipped_label = SARCASM_FLIP.get(top_label, top_label)
-            # Flipped emotion ko top pe lao
             for e in all_scores:
                 if e["label"] == flipped_label:
                     e["score"] = all_scores[0]["score"]
@@ -106,8 +107,6 @@ async def detect_text_emotion(text: str = Form(...)):
         "emotions": raw,
         "is_sarcastic": False
     }
-
-# ---------------- FACE EMOTION ----------------
 
 @app.post("/detect-face-emotion")
 async def detect_face_emotion(file: UploadFile = File(...)):

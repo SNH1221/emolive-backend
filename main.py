@@ -42,8 +42,6 @@ async def detect_text_emotion(text: str = Form(...)):
         json={"inputs": text}
     )
     sarcasm_raw = sarcasm_response.json()
-
-    # DEBUG LOGS
     print(f"Sarcasm raw response: {sarcasm_raw}")
 
     is_sarcastic = False
@@ -57,7 +55,6 @@ async def detect_text_emotion(text: str = Form(...)):
     except:
         is_sarcastic = False
 
-    # DEBUG LOGS
     print(f"Is sarcastic: {is_sarcastic}")
 
     # Step 2 — Emotion detect
@@ -72,6 +69,7 @@ async def detect_text_emotion(text: str = Form(...)):
     )
 
     raw = emotion_response.json()
+    print(f"Emotion raw response: {raw}")  # DEBUG
 
     if isinstance(raw, list) and len(raw) > 0:
         emotions_raw = raw[0] if isinstance(raw[0], list) else raw
@@ -89,11 +87,12 @@ async def detect_text_emotion(text: str = Form(...)):
         if is_sarcastic:
             top_label = all_scores[0]["label"]
             flipped_label = SARCASM_FLIP.get(top_label, top_label)
+            original_top_score = all_scores[0]["score"]
             for e in all_scores:
                 if e["label"] == flipped_label:
-                    e["score"] = all_scores[0]["score"]
-                    all_scores[0]["score"] = 0.01
-                    break
+                    e["score"] = original_top_score
+                elif e["label"] == top_label:
+                    e["score"] = 0.01
             all_scores.sort(key=lambda x: x["score"], reverse=True)
 
         return {
@@ -102,9 +101,11 @@ async def detect_text_emotion(text: str = Form(...)):
             "is_sarcastic": is_sarcastic
         }
 
+    # Fallback — raw jo bhi hai usse handle karo
+    print(f"Fallback triggered — raw: {raw}")
     return {
         "text": text,
-        "emotions": raw,
+        "emotions": [[{"label": e, "score": 0.0} for e in ALL_EMOTIONS]],
         "is_sarcastic": False
     }
 

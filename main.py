@@ -8,6 +8,7 @@ app = FastAPI()
 HF_TOKEN = os.getenv("HF_TOKEN")
 
 TEXT_MODEL = "michellejieli/emotion_text_classifier"
+SARCASM_MODEL = "cardiffnlp/twitter-roberta-base-irony"
 FACE_MODEL = "dima806/facial_emotions_image_detection"
 
 HEADERS = {
@@ -15,6 +16,17 @@ HEADERS = {
 }
 
 ALL_EMOTIONS = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
+
+# Sarcasm hone pe emotion flip karo
+SARCASM_FLIP = {
+    "joy": "disgust",
+    "disgust": "joy",
+    "anger": "joy",
+    "sadness": "joy",
+    "fear": "neutral",
+    "surprise": "neutral",
+    "neutral": "neutral"
+}
 
 @app.get("/")
 def root():
@@ -24,10 +36,31 @@ def root():
 
 @app.post("/detect-text-emotion")
 async def detect_text_emotion(text: str = Form(...)):
-    url = f"https://router.huggingface.co/hf-inference/models/{TEXT_MODEL}"
 
-    response = requests.post(
-        url,
+    # Step 1 — Sarcasm check
+    sarcasm_url = f"https://router.huggingface.co/hf-inference/models/{SARCASM_MODEL}"
+    sarcasm_response = requests.post(
+        sarcasm_url,
+        headers=HEADERS,
+        json={"inputs": text}
+    )
+    sarcasm_raw = sarcasm_response.json()
+    
+    is_sarcastic = False
+    try:
+        if isinstance(sarcasm_raw, list):
+            sarcasm_data = sarcasm_raw[0] if isinstance(sarcasm_raw[0], list) else sarcasm_raw
+            for item in sarcasm_data:
+                if item["label"].lower() in ["irony", "sarcasm"] and item["score"] > 0.6:
+                    is_sarcastic = True
+                    break
+    except:
+        is_sarcastic = False
+
+    # Step 2 — Emotion detect
+    emotion_url = f"https://router.huggingface.co/hf-inference/models/{TEXT_MODEL}"
+    emotion_response = requests.post(
+        emotion_url,
         headers=HEADERS,
         json={
             "inputs": text,
@@ -35,7 +68,7 @@ async def detect_text_emotion(text: str = Form(...)):
         }
     )
 
-    raw = response.json()
+    raw = emotion_response.json()
 
     if isinstance(raw, list) and len(raw) > 0:
         emotions_raw = raw[0] if isinstance(raw[0], list) else raw
@@ -50,14 +83,28 @@ async def detect_text_emotion(text: str = Form(...)):
 
         all_scores.sort(key=lambda x: x["score"], reverse=True)
 
+        # Step 3 — Sarcasm hone pe top emotion flip karo
+        if is_sarcastic:
+            top_label = all_scores[0]["label"]
+            flipped_label = SARCASM_FLIP.get(top_label, top_label)
+            # Flipped emotion ko top pe lao
+            for e in all_scores:
+                if e["label"] == flipped_label:
+                    e["score"] = all_scores[0]["score"]
+                    all_scores[0]["score"] = 0.01
+                    break
+            all_scores.sort(key=lambda x: x["score"], reverse=True)
+
         return {
             "text": text,
-            "emotions": [all_scores]
+            "emotions": [all_scores],
+            "is_sarcastic": is_sarcastic
         }
 
     return {
         "text": text,
-        "emotions": raw
+        "emotions": raw,
+        "is_sarcastic": False
     }
 
 # ---------------- FACE EMOTION ----------------

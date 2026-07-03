@@ -17,28 +17,26 @@ HEADERS = {
 
 ALL_EMOTIONS = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
 
+# Sirf fake positive emotions flip karo
 SARCASM_FLIP = {
     "joy": "disgust",
-    "disgust": "joy",
-    "anger": "joy",
-    "sadness": "joy",
-    "fear": "neutral",
-    "surprise": "neutral",
-    "neutral": "neutral"
+    "surprise": "disgust",
 }
 
 # Genuine positive phrases — sarcasm mat lagao inpe
 GENUINE_POSITIVE = [
     "got the job", "i love you", "best day", "so happy", "congratulations",
     "got promoted", "we won", "i passed", "she said yes", "he said yes",
-    "i got in", "accepted", "i am so excited", "can't wait", "finally did it"
+    "i got in", "accepted", "i am so excited", "can't wait", "finally did it",
+    "i can't believe i got", "best news"
 ]
 
 # Negative context words — sarcasm zyada likely hai
 NEGATIVE_CONTEXT = [
     "ignored", "hate", "stuck", "terrible", "awful", "worst", "again",
     "another monday", "as usual", "obviously", "totally fine", "just great",
-    "love being", "love getting", "love waiting", "love sitting"
+    "love being", "love getting", "love waiting", "love sitting",
+    "stealing", "talking over", "ghost", "invisible"
 ]
 
 @app.get("/")
@@ -76,7 +74,6 @@ async def detect_text_emotion(text: str = Form(...)):
                     label = item["label"].lower()
                     score = item["score"]
 
-                    # Negative context mein threshold kam, warna zyada strict
                     threshold = 0.75 if has_negative_context else 0.90
 
                     if label in ["irony", "sarcasm"] and score > threshold:
@@ -116,19 +113,17 @@ async def detect_text_emotion(text: str = Form(...)):
 
         all_scores.sort(key=lambda x: x["score"], reverse=True)
 
-        # Step 3 — Sarcasm flip
+        # Step 3 — Sirf joy/surprise flip karo sarcasm mein
         if is_sarcastic:
             top_label = all_scores[0]["label"]
-            flipped_label = SARCASM_FLIP.get(top_label, top_label)
-            original_top_score = all_scores[0]["score"]
+            flipped_label = SARCASM_FLIP.get(top_label, None)
 
-            if flipped_label != top_label:
-                for e in all_scores:
-                    if e["label"] == flipped_label:
-                        e["score"] = original_top_score
-                    elif e["label"] == top_label:
-                        e["score"] = 0.01
-
+            if flipped_label and flipped_label != top_label:
+                original_top_score = all_scores[0]["score"]
+                scores_dict = {e["label"]: e["score"] for e in all_scores}
+                scores_dict[flipped_label] = original_top_score
+                scores_dict[top_label] = 0.01
+                all_scores = [{"label": k, "score": v} for k, v in scores_dict.items()]
                 all_scores.sort(key=lambda x: x["score"], reverse=True)
 
         return {

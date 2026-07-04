@@ -110,7 +110,7 @@ Instructions:
 
 Example: [{{"label": "joy", "score": 0.85}}, {{"label": "excitement", "score": 0.10}}, {{"label": "relief", "score": 0.05}}]"""
 
-        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
 
         gemini_response = requests.post(
             gemini_url,

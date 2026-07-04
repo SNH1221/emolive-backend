@@ -6,7 +6,7 @@ import json
 app = FastAPI()
 
 HF_TOKEN = os.getenv("HF_TOKEN")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 TEXT_MODEL = "SamLowe/roberta-base-go_emotions"
 SARCASM_MODEL = "cardiffnlp/twitter-roberta-base-irony"
@@ -88,7 +88,7 @@ async def detect_text_emotion(text: str = Form(...)):
     except:
         raw_scores = [{"label": "neutral", "score": 1.0}]
 
-    # Step 3 — Gemini final decision
+    # Step 3 — Groq final decision
     try:
         top_5 = raw_scores[:5]
         top_5_str = ", ".join([f"{e['label']}({int(e['score']*100)}%)" for e in top_5])
@@ -103,34 +103,44 @@ NLP Model detected (top 5): {top_5_str}
 Instructions:
 - Consider the full context and meaning
 - If sarcastic, adjust emotions accordingly
-- Return ONLY a JSON array of top 7 emotions
+- Return ONLY a JSON array of top 7 emotions with corrected scores
 - Use only these labels: admiration, amusement, anger, annoyance, approval, caring, confusion, curiosity, desire, disappointment, disapproval, disgust, embarrassment, excitement, fear, gratitude, grief, joy, love, nervousness, neutral, optimism, pride, realization, relief, remorse, sadness, surprise
 - Scores must sum to 1.0
 - Return ONLY valid JSON array, no markdown, no explanation
 
-Example: [{{"label": "joy", "score": 0.85}}, {{"label": "excitement", "score": 0.10}}, {{"label": "relief", "score": 0.05}}]"""
+Example: [{{"label": "fear", "score": 0.85}}, {{"label": "nervousness", "score": 0.10}}, {{"label": "surprise", "score": 0.05}}]"""
 
-        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key={GEMINI_API_KEY}"
-
-        gemini_response = requests.post(
-            gemini_url,
+        groq_response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
             json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.1,
-                    "responseMimeType": "application/json"
-                }
+                "model": "llama3-70b-8192",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are an emotion detection expert. Always respond with valid JSON only."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "temperature": 0.1,
+                "max_tokens": 500
             }
         )
 
-        gemini_json = gemini_response.json()
-        print(f"Gemini full response: {gemini_json}")
+        groq_data = groq_response.json()
+        print(f"Groq response: {groq_data}")
 
-        gemini_text = gemini_json["candidates"][0]["content"]["parts"][0]["text"]
-        gemini_text = gemini_text.strip().replace("```json", "").replace("```", "").strip()
-        print(f"Gemini parsed text: {gemini_text}")
+        groq_text = groq_data["choices"][0]["message"]["content"]
+        groq_text = groq_text.strip().replace("```json", "").replace("```", "").strip()
+        print(f"Groq parsed: {groq_text}")
 
-        final_emotions = json.loads(gemini_text)
+        final_emotions = json.loads(groq_text)
         final_emotions.sort(key=lambda x: x["score"], reverse=True)
 
         return {
@@ -140,11 +150,11 @@ Example: [{{"label": "joy", "score": 0.85}}, {{"label": "excitement", "score": 0
         }
 
     except Exception as e:
-        print(f"Gemini error: {e}")
+        print(f"Groq error: {e}")
         try:
-            print(f"Gemini raw response: {gemini_response.json()}")
+            print(f"Groq raw response: {groq_response.json()}")
         except:
-            print("Could not parse gemini response")
+            pass
         return {
             "text": text,
             "emotions": [raw_scores],

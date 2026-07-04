@@ -92,25 +92,23 @@ async def detect_text_emotion(text: str = Form(...)):
     try:
         top_5 = raw_scores[:5]
         top_5_str = ", ".join([f"{e['label']}({int(e['score']*100)}%)" for e in top_5])
-
         sarcasm_note = "The text appears to be sarcastic/ironic." if is_sarcastic else ""
 
-        prompt = f"""You are an emotion detection expert. Analyze this text and return the corrected emotion scores.
+        prompt = f"""You are an emotion detection expert. Analyze this text and return corrected emotion scores.
 
 Text: "{text}"
 NLP Model detected (top 5): {top_5_str}
 {sarcasm_note}
 
 Instructions:
-- Consider the full context and meaning of the text
+- Consider the full context and meaning
 - If sarcastic, adjust emotions accordingly
-- Return ONLY a JSON array of top 7 emotions with corrected scores
-- Use these emotion labels only: admiration, amusement, anger, annoyance, approval, caring, confusion, curiosity, desire, disappointment, disapproval, disgust, embarrassment, excitement, fear, gratitude, grief, joy, love, nervousness, neutral, optimism, pride, realization, relief, remorse, sadness, surprise
+- Return ONLY a JSON array of top 7 emotions
+- Use only these labels: admiration, amusement, anger, annoyance, approval, caring, confusion, curiosity, desire, disappointment, disapproval, disgust, embarrassment, excitement, fear, gratitude, grief, joy, love, nervousness, neutral, optimism, pride, realization, relief, remorse, sadness, surprise
 - Scores must sum to 1.0
-- Return ONLY the JSON array, no other text
+- Return ONLY valid JSON array, no markdown, no explanation
 
-Example format:
-[{{"label": "joy", "score": 0.85}}, {{"label": "excitement", "score": 0.10}}, {{"label": "relief", "score": 0.05}}]"""
+Example: [{{"label": "joy", "score": 0.85}}, {{"label": "excitement", "score": 0.10}}, {{"label": "relief", "score": 0.05}}]"""
 
         gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
 
@@ -118,15 +116,19 @@ Example format:
             gemini_url,
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.1}
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "responseMimeType": "application/json"
+                }
             }
         )
 
-        gemini_data = gemini_response.json()
-        gemini_text = gemini_data["candidates"][0]["content"]["parts"][0]["text"]
-        gemini_text = gemini_text.strip().replace("```json", "").replace("```", "").strip()
+        gemini_json = gemini_response.json()
+        print(f"Gemini full response: {gemini_json}")
 
-        print(f"Gemini response: {gemini_text}")
+        gemini_text = gemini_json["candidates"][0]["content"]["parts"][0]["text"]
+        gemini_text = gemini_text.strip().replace("```json", "").replace("```", "").strip()
+        print(f"Gemini parsed text: {gemini_text}")
 
         final_emotions = json.loads(gemini_text)
         final_emotions.sort(key=lambda x: x["score"], reverse=True)
@@ -138,7 +140,11 @@ Example format:
         }
 
     except Exception as e:
-        print(f"Gemini error: {e} — falling back to NLP scores")
+        print(f"Gemini error: {e}")
+        try:
+            print(f"Gemini raw response: {gemini_response.json()}")
+        except:
+            print("Could not parse gemini response")
         return {
             "text": text,
             "emotions": [raw_scores],

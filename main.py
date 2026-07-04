@@ -1,7 +1,6 @@
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, Form
 import requests
 import os
-import base64
 
 app = FastAPI()
 
@@ -9,18 +8,9 @@ HF_TOKEN = os.getenv("HF_TOKEN")
 
 TEXT_MODEL = "SamLowe/roberta-base-go_emotions"
 SARCASM_MODEL = "cardiffnlp/twitter-roberta-base-irony"
-FACE_MODEL = "dima806/facial_emotions_image_detection"
 
 HEADERS = {
     "Authorization": f"Bearer {HF_TOKEN}"
-}
-
-ALL_EMOTIONS = ["anger", "disgust", "fear", "joy", "neutral", "sadness", "surprise"]
-
-# Sirf fake positive emotions flip karo
-SARCASM_FLIP = {
-    "joy": "disgust",
-    "surprise": "disgust",
 }
 
 # Genuine positive phrases — sarcasm mat lagao inpe
@@ -39,6 +29,15 @@ NEGATIVE_CONTEXT = [
     "stealing", "talking over", "ghost", "invisible"
 ]
 
+# Sirf fake positive emotions flip karo
+SARCASM_FLIP = {
+    "joy": "disapproval",
+    "amusement": "annoyance",
+    "excitement": "annoyance",
+    "optimism": "disappointment",
+    "surprise": "annoyance",
+}
+
 @app.get("/")
 def root():
     return {"message": "EmoLive Backend Running"}
@@ -48,10 +47,7 @@ async def detect_text_emotion(text: str = Form(...)):
 
     text_lower = text.lower()
 
-    # Genuine positive check
     has_genuine_positive = any(phrase in text_lower for phrase in GENUINE_POSITIVE)
-
-    # Negative context check
     has_negative_context = any(phrase in text_lower for phrase in NEGATIVE_CONTEXT)
 
     # Step 1 — Sarcasm check
@@ -73,9 +69,7 @@ async def detect_text_emotion(text: str = Form(...)):
                 for item in sarcasm_data:
                     label = item["label"].lower()
                     score = item["score"]
-
                     threshold = 0.75 if has_negative_context else 0.90
-
                     if label in ["irony", "sarcasm"] and score > threshold:
                         is_sarcastic = True
                         break
@@ -93,7 +87,7 @@ async def detect_text_emotion(text: str = Form(...)):
         headers=HEADERS,
         json={
             "inputs": text,
-            "parameters": {"top_k": 7}
+            "parameters": {"top_k": 28}
         }
     )
 
@@ -102,18 +96,15 @@ async def detect_text_emotion(text: str = Form(...)):
 
     if isinstance(raw, list) and len(raw) > 0:
         emotions_raw = raw[0] if isinstance(raw[0], list) else raw
-        returned_labels = {e["label"].lower(): e["score"] for e in emotions_raw}
 
-        all_scores = []
-        for emotion in ALL_EMOTIONS:
-            all_scores.append({
-                "label": emotion,
-                "score": returned_labels.get(emotion, 0.0)
-            })
+        all_scores = [
+            {"label": e["label"].lower(), "score": e["score"]}
+            for e in emotions_raw
+        ]
 
         all_scores.sort(key=lambda x: x["score"], reverse=True)
 
-        # Step 3 — Sirf joy/surprise flip karo sarcasm mein
+        # Step 3 — Sarcasm flip
         if is_sarcastic:
             top_label = all_scores[0]["label"]
             flipped_label = SARCASM_FLIP.get(top_label, None)
@@ -135,21 +126,6 @@ async def detect_text_emotion(text: str = Form(...)):
     print(f"Fallback triggered — raw: {raw}")
     return {
         "text": text,
-        "emotions": [[{"label": e, "score": 0.0} for e in ALL_EMOTIONS]],
+        "emotions": [[{"label": "neutral", "score": 1.0}]],
         "is_sarcastic": False
     }
-
-@app.post("/detect-face-emotion")
-async def detect_face_emotion(file: UploadFile = File(...)):
-    contents = await file.read()
-    base64_image = base64.b64encode(contents).decode("utf-8")
-
-    url = f"https://router.huggingface.co/hf-inference/models/{FACE_MODEL}"
-
-    response = requests.post(
-        url,
-        headers=HEADERS,
-        json={"inputs": base64_image}
-    )
-
-    return response.json()

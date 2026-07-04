@@ -69,7 +69,7 @@ async def detect_text_emotion(text: str = Form(...)):
                 for item in sarcasm_data:
                     label = item["label"].lower()
                     score = item["score"]
-                    threshold = 0.75 if has_negative_context else 0.90
+                    threshold = 0.75 if has_negative_context else 0.85
                     if label in ["irony", "sarcasm"] and score > threshold:
                         is_sarcastic = True
                         break

@@ -121,7 +121,7 @@ Example: [{{"label": "fear", "score": 0.85}}, {{"label": "nervousness", "score":
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are an emotion detection expert. Always respond with valid JSON only."
+                        "content": "You are an emotion detection expert. Always respond with valid JSON array only, no explanation."
                     },
                     {
                         "role": "user",
@@ -134,8 +134,6 @@ Example: [{{"label": "fear", "score": 0.85}}, {{"label": "nervousness", "score":
         )
 
         groq_data = groq_response.json()
-        print(f"Groq response: {groq_data}")
-
         groq_text = groq_data["choices"][0]["message"]["content"]
         groq_text = groq_text.strip().replace("```json", "").replace("```", "").strip()
         print(f"Groq parsed: {groq_text}")
@@ -151,12 +149,65 @@ Example: [{{"label": "fear", "score": 0.85}}, {{"label": "nervousness", "score":
 
     except Exception as e:
         print(f"Groq error: {e}")
-        try:
-            print(f"Groq raw response: {groq_response.json()}")
-        except:
-            pass
         return {
             "text": text,
             "emotions": [raw_scores],
             "is_sarcastic": is_sarcastic
         }
+
+@app.post("/generate-ai-response")
+async def generate_ai_response(emotion: str = Form(...)):
+    try:
+        prompt = when_emotion_prompt(emotion)
+
+        groq_response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a compassionate emotional support assistant. Give warm, empathetic responses in 2-3 sentences."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                "max_tokens": 200,
+                "temperature": 0.7
+            }
+        )
+
+        data = groq_response.json()
+        ai_text = data["choices"][0]["message"]["content"]
+        return {"response": ai_text}
+
+    except Exception as e:
+        print(f"AI Response error: {e}")
+        return {"response": "Could not generate response."}
+
+def when_emotion_prompt(emotion: str) -> str:
+    emotion = emotion.lower()
+    if emotion in ["joy", "excitement", "admiration"]:
+        return f"The user is feeling {emotion}. Give a warm, celebratory empathetic response in 2-3 sentences. Suggest one way to maintain this positive energy."
+    elif emotion in ["sadness", "grief", "disappointment", "remorse"]:
+        return f"The user is feeling {emotion}. Give a compassionate empathetic response in 2-3 sentences. Suggest one gentle positive reframe."
+    elif emotion in ["anger", "annoyance", "disapproval"]:
+        return f"The user is feeling {emotion}. Give a calm, understanding empathetic response in 2-3 sentences. Suggest one way to channel this energy positively."
+    elif emotion in ["fear", "nervousness"]:
+        return f"The user is feeling {emotion}. Give a reassuring empathetic response in 2-3 sentences. Suggest one grounding technique."
+    elif emotion == "relief":
+        return f"The user is feeling relief. Give a warm, validating empathetic response in 2-3 sentences."
+    elif emotion in ["love", "caring"]:
+        return f"The user is feeling {emotion}. Give a warm, heartfelt empathetic response in 2-3 sentences."
+    elif emotion == "confusion":
+        return f"The user is feeling confused. Give a calm, clarifying empathetic response in 2-3 sentences."
+    elif emotion == "surprise":
+        return f"The user is feeling surprised. Give a fun, engaging empathetic response in 2-3 sentences."
+    else:
+        return f"The user is feeling {emotion}. Give a gentle, encouraging empathetic response in 2-3 sentences."

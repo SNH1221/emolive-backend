@@ -19,7 +19,8 @@ GENUINE_POSITIVE = [
     "got the job", "i love you", "best day", "so happy", "congratulations",
     "got promoted", "we won", "i passed", "she said yes", "he said yes",
     "i got in", "accepted", "i am so excited", "can't wait", "finally did it",
-    "i can't believe i got", "best news"
+    "i can't believe i got", "best news", "everything is normal", "doctor said",
+    "test results normal", "all clear", "healthy", "recovered", "feeling better"
 ]
 
 NEGATIVE_CONTEXT = [

@@ -107,6 +107,8 @@ Instructions:
 - Return ONLY a JSON array of top 7 emotions with corrected scores
 - Use only these labels: admiration, amusement, anger, annoyance, approval, caring, confusion, curiosity, desire, disappointment, disapproval, disgust, embarrassment, excitement, fear, gratitude, grief, joy, love, nervousness, neutral, optimism, pride, realization, relief, remorse, sadness, surprise
 - Scores must sum to 1.0
+- For Monday/work frustration, prefer "annoyance" over "disapproval"
+- For passive aggressive statements, prefer "annoyance" 
 - Return ONLY valid JSON array, no markdown, no explanation
 
 Example: [{{"label": "fear", "score": 0.85}}, {{"label": "nervousness", "score": 0.10}}, {{"label": "surprise", "score": 0.05}}]"""

@@ -13,7 +13,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # MODELS
 TEXT_MODEL = "SamLowe/roberta-base-go_emotions"
 SARCASM_MODEL = "cardiffnlp/twitter-roberta-base-irony"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-20b"
 
 # API CONFIGURATION
 HEADERS = {

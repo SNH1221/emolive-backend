@@ -6,51 +6,101 @@ import json
 
 app = FastAPI()
 
-# API KEYS
+# ==========================================
+# CONFIGURATION
+# ==========================================
+
 HF_TOKEN = os.getenv("HF_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# MODELS
 TEXT_MODEL = "SamLowe/roberta-base-go_emotions"
 SARCASM_MODEL = "cardiffnlp/twitter-roberta-base-irony"
+
 GROQ_MODEL = "openai/gpt-oss-20b"
 
-# API CONFIGURATION
-HEADERS = {
+TIMEOUT = 60
+
+HF_HEADERS = {
     "Authorization": f"Bearer {HF_TOKEN}"
 }
 
-TIMEOUT = 60
+# ==========================================
+# GENUINE POSITIVE DETECTION
+# ==========================================
 
 GENUINE_POSITIVE = [
     "got the job", "i love you", "best day", "so happy",
     "congratulations", "got promoted", "we won", "i passed",
     "she said yes", "he said yes", "i got in", "accepted",
     "i am so excited", "can't wait", "finally did it",
-    "i can't believe i got", "best news", "everything is normal",
-    "doctor said", "test results normal", "all clear",
-    "healthy", "recovered", "feeling better"
+    "i can't believe i got", "best news",
+    "everything is normal", "doctor said",
+    "test results normal", "all clear", "healthy",
+    "recovered", "feeling better"
 ]
 
 NEGATIVE_CONTEXT = [
-    "ignored", "hate", "stuck", "terrible", "awful", "worst",
-    "again", "another monday", "as usual", "obviously",
-    "totally fine", "just great", "love being", "love getting",
-    "love waiting", "love sitting", "stealing", "talking over",
+    "ignored", "hate", "stuck", "terrible", "awful",
+    "worst", "again", "another monday", "as usual",
+    "obviously", "totally fine", "just great",
+    "love being", "love getting", "love waiting",
+    "love sitting", "stealing", "talking over",
     "ghost", "invisible"
 ]
+
+ALLOWED_LABELS = {
+    "admiration", "amusement", "anger", "annoyance",
+    "approval", "caring", "confusion", "curiosity",
+    "desire", "disappointment", "disapproval", "disgust",
+    "embarrassment", "excitement", "fear", "gratitude",
+    "grief", "joy", "love", "nervousness", "neutral",
+    "optimism", "pride", "realization", "relief",
+    "remorse", "sadness", "surprise"
+}
 
 
 # ==========================================
 # GROQ API HELPER
 # ==========================================
 
-def call_groq(prompt, system_prompt, max_tokens=500, temperature=0.1):
+def call_groq(
+    prompt,
+    system_prompt,
+    max_tokens=1200,
+    temperature=0.1,
+    json_mode=False
+):
 
     if not GROQ_API_KEY:
-        raise ValueError("GROQ_API_KEY is missing in Render environment variables.")
+        raise ValueError(
+            "GROQ_API_KEY is missing from environment variables."
+        )
 
-    groq_response = requests.post(
+    payload = {
+        "model": GROQ_MODEL,
+
+        "messages": [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+
+        "temperature": temperature,
+        "max_completion_tokens": max_tokens,
+        "include_reasoning": False
+    }
+
+    if json_mode:
+        payload["response_format"] = {
+            "type": "json_object"
+        }
+
+    response = requests.post(
         "https://api.groq.com/openai/v1/chat/completions",
 
         headers={
@@ -58,51 +108,295 @@ def call_groq(prompt, system_prompt, max_tokens=500, temperature=0.1):
             "Content-Type": "application/json"
         },
 
-        json={
-            "model": GROQ_MODEL,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": system_prompt
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            "temperature": temperature,
-            "max_tokens": max_tokens
-        },
-
+        json=payload,
         timeout=TIMEOUT
     )
 
-    # DEBUGGING INFORMATION
-    print("========== GROQ API DEBUG ==========")
-    print("Groq Model:", GROQ_MODEL)
-    print("Groq Status Code:", groq_response.status_code)
-    print("Groq Full Response:", groq_response.text)
-    print("====================================")
+    print("\n========== GROQ API DEBUG ==========")
+    print("Model:", GROQ_MODEL)
+    print("Status Code:", response.status_code)
+    print("Full Response:", response.text)
+    print("====================================\n")
 
-    # Check HTTP errors
-    groq_response.raise_for_status()
+    response.raise_for_status()
 
-    groq_data = groq_response.json()
+    data = response.json()
 
-    # Check whether choices exists
-    if "choices" not in groq_data:
-        raise ValueError(f"Groq API returned no choices: {groq_data}")
+    if "choices" not in data or not data["choices"]:
+        raise ValueError(
+            f"Groq returned no choices: {data}"
+        )
 
-    if not groq_data["choices"]:
-        raise ValueError("Groq returned an empty choices list.")
+    choice = data["choices"][0]
 
-    message = groq_data["choices"][0].get("message", {})
+    print("Finish Reason:", choice.get("finish_reason"))
+
+    if choice.get("finish_reason") == "length":
+        raise ValueError(
+            "Groq response was truncated due to token limit."
+        )
+
+    message = choice.get("message", {})
     content = message.get("content")
 
     if not content:
-        raise ValueError(f"Groq returned empty content: {groq_data}")
+        raise ValueError(
+            f"Groq returned empty content: {data}"
+        )
 
     return content.strip()
+
+
+# ==========================================
+# HUGGING FACE API HELPER
+# ==========================================
+
+def call_huggingface(model, text, parameters=None):
+
+    if not HF_TOKEN:
+        raise ValueError(
+            "HF_TOKEN is missing from environment variables."
+        )
+
+    url = (
+        f"https://router.huggingface.co/"
+        f"hf-inference/models/{model}"
+    )
+
+    payload = {
+        "inputs": text
+    }
+
+    if parameters:
+        payload["parameters"] = parameters
+
+    response = requests.post(
+        url,
+        headers=HF_HEADERS,
+        json=payload,
+        timeout=TIMEOUT
+    )
+
+    print("\n========== HUGGING FACE DEBUG ==========")
+    print("Model:", model)
+    print("Status:", response.status_code)
+    print("Response:", response.text)
+    print("=======================================\n")
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+# ==========================================
+# RESPONSE NORMALIZATION
+# ==========================================
+
+def extract_scores(raw):
+
+    if not isinstance(raw, list) or not raw:
+        raise ValueError(
+            f"Invalid Hugging Face response: {raw}"
+        )
+
+    # Handle nested model response
+    emotions = raw[0] if isinstance(raw[0], list) else raw
+
+    if not emotions or not isinstance(emotions, list):
+        raise ValueError("No emotion scores found.")
+
+    scores = []
+
+    for item in emotions:
+
+        if not isinstance(item, dict):
+            continue
+
+        label = item.get("label")
+        score = item.get("score")
+
+        if label is None or score is None:
+            continue
+
+        scores.append({
+            "label": str(label).lower(),
+            "score": round(float(score), 4)
+        })
+
+    if not scores:
+        raise ValueError("No valid emotion scores.")
+
+    scores.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    return scores
+
+
+# ==========================================
+# GROQ EMOTION REFINEMENT
+# ==========================================
+
+def refine_emotions(
+    text,
+    raw_scores,
+    is_sarcastic
+):
+
+    top_5 = raw_scores[:5]
+
+    top_5_str = ", ".join(
+        [
+            f"{e['label']}({int(e['score'] * 100)}%)"
+            for e in top_5
+        ]
+    )
+
+    sarcasm_note = (
+        "The text appears to be sarcastic or ironic."
+        if is_sarcastic
+        else "No sarcasm was detected."
+    )
+
+    prompt = f"""
+Analyze the emotional meaning of the following text.
+
+TEXT:
+{text}
+
+ORIGINAL NLP MODEL RESULTS:
+{top_5_str}
+
+SARCASM INFORMATION:
+{sarcasm_note}
+
+TASK:
+
+Refine the emotion scores using the complete context and meaning.
+
+If sarcasm is detected, consider the underlying emotion rather
+than interpreting the literal positive words.
+
+Use ONLY these emotion labels:
+
+admiration, amusement, anger, annoyance, approval, caring,
+confusion, curiosity, desire, disappointment, disapproval,
+disgust, embarrassment, excitement, fear, gratitude, grief,
+joy, love, nervousness, neutral, optimism, pride, realization,
+relief, remorse, sadness, surprise
+
+RULES:
+
+1. Return exactly 7 emotions.
+2. Scores must be between 0 and 1.
+3. All 7 scores must sum to 1.0.
+4. Put the highest score first.
+5. Consider the original NLP results.
+6. For Monday/work frustration, prefer annoyance over disapproval.
+7. For passive-aggressive statements, prefer annoyance.
+8. Do not invent emotions unrelated to the text.
+9. Return only a JSON object.
+10. Do not include explanations or reasoning.
+
+REQUIRED JSON STRUCTURE:
+
+{{
+    "emotions": [
+        {{"label": "fear", "score": 0.45}},
+        {{"label": "nervousness", "score": 0.25}},
+        {{"label": "surprise", "score": 0.15}},
+        {{"label": "annoyance", "score": 0.05}},
+        {{"label": "disgust", "score": 0.05}},
+        {{"label": "disapproval", "score": 0.03}},
+        {{"label": "confusion", "score": 0.02}}
+    ]
+}}
+"""
+
+    groq_text = call_groq(
+        prompt=prompt,
+
+        system_prompt=(
+            "You are an expert in contextual emotion analysis. "
+            "Return only a valid JSON object with an emotions array. "
+            "Never include additional text."
+        ),
+
+        max_tokens=1200,
+        temperature=0.1,
+        json_mode=True
+    )
+
+    print("Groq JSON Output:", groq_text)
+
+    result = json.loads(groq_text)
+
+    if not isinstance(result, dict):
+        raise ValueError("Expected a JSON object.")
+
+    final_emotions = result.get("emotions")
+
+    if not isinstance(final_emotions, list):
+        raise ValueError("Missing emotions array.")
+
+    if len(final_emotions) != 7:
+        raise ValueError(
+            f"Expected 7 emotions, got {len(final_emotions)}."
+        )
+
+    validated = []
+
+    for item in final_emotions:
+
+        label = str(item["label"]).lower()
+        score = float(item["score"])
+
+        if label not in ALLOWED_LABELS:
+            raise ValueError(
+                f"Invalid emotion label: {label}"
+            )
+
+        if not 0 <= score <= 1:
+            raise ValueError(
+                f"Invalid emotion score: {score}"
+            )
+
+        validated.append({
+            "label": label,
+            "score": score
+        })
+
+    total = sum(
+        item["score"] for item in validated
+    )
+
+    if total <= 0:
+        raise ValueError("Total emotion score cannot be zero.")
+
+    # Normalize scores to exactly 1.0
+    for item in validated:
+        item["score"] = round(
+            item["score"] / total, 4
+        )
+
+    # Correct rounding difference
+    difference = round(
+        1.0 - sum(item["score"] for item in validated),
+        4
+    )
+
+    validated[0]["score"] = round(
+        validated[0]["score"] + difference,
+        4
+    )
+
+    validated.sort(
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    return validated
 
 
 # ==========================================
@@ -111,13 +405,14 @@ def call_groq(prompt, system_prompt, max_tokens=500, temperature=0.1):
 
 @app.get("/")
 def root():
+
     return {
         "message": "EmoLive Backend Running"
     }
 
 
 # ==========================================
-# EMOTION DETECTION
+# STEP 1: EMOTION DETECTION
 # ==========================================
 
 @app.post("/detect-text-emotion")
@@ -126,11 +421,13 @@ async def detect_text_emotion(text: str = Form(...)):
     text_lower = text.lower()
 
     has_genuine_positive = any(
-        phrase in text_lower for phrase in GENUINE_POSITIVE
+        phrase in text_lower
+        for phrase in GENUINE_POSITIVE
     )
 
     has_negative_context = any(
-        phrase in text_lower for phrase in NEGATIVE_CONTEXT
+        phrase in text_lower
+        for phrase in NEGATIVE_CONTEXT
     )
 
     # ======================================
@@ -143,31 +440,14 @@ async def detect_text_emotion(text: str = Form(...)):
 
         try:
 
-            if not HF_TOKEN:
-                raise ValueError("HF_TOKEN is missing.")
-
-            sarcasm_url = (
-                f"https://router.huggingface.co/hf-inference/models/{SARCASM_MODEL}"
+            sarcasm_raw = call_huggingface(
+                SARCASM_MODEL,
+                text
             )
-
-            sarcasm_response = requests.post(
-                sarcasm_url,
-                headers=HEADERS,
-                json={"inputs": text},
-                timeout=TIMEOUT
-            )
-
-            print("========== HUGGING FACE SARCASM ==========")
-            print("Status:", sarcasm_response.status_code)
-            print("Response:", sarcasm_response.text)
-
-            sarcasm_response.raise_for_status()
-
-            sarcasm_raw = sarcasm_response.json()
 
             print("Sarcasm raw:", sarcasm_raw)
 
-            if isinstance(sarcasm_raw, list) and len(sarcasm_raw) > 0:
+            if isinstance(sarcasm_raw, list) and sarcasm_raw:
 
                 sarcasm_data = (
                     sarcasm_raw[0]
@@ -184,7 +464,7 @@ async def detect_text_emotion(text: str = Form(...)):
                     if (
                         item.get("label", "").lower()
                         in ["irony", "sarcasm"]
-                        and item.get("score", 0) > threshold
+                        and float(item.get("score", 0)) > threshold
                     ):
 
                         is_sarcastic = True
@@ -192,7 +472,11 @@ async def detect_text_emotion(text: str = Form(...)):
 
         except Exception as e:
 
-            print("Sarcasm Detection Error:", repr(e))
+            print(
+                "Sarcasm Detection Error:",
+                repr(e)
+            )
+
             is_sarcastic = False
 
     print("Is sarcastic:", is_sarcastic)
@@ -203,65 +487,24 @@ async def detect_text_emotion(text: str = Form(...)):
 
     try:
 
-        if not HF_TOKEN:
-            raise ValueError("HF_TOKEN is missing.")
-
-        emotion_url = (
-            f"https://router.huggingface.co/hf-inference/models/{TEXT_MODEL}"
+        emotion_raw = call_huggingface(
+            TEXT_MODEL,
+            text,
+            parameters={
+                "top_k": 28
+            }
         )
 
-        emotion_response = requests.post(
-            emotion_url,
-            headers=HEADERS,
-            json={
-                "inputs": text,
-                "parameters": {
-                    "top_k": 28
-                }
-            },
-            timeout=TIMEOUT
-        )
+        print("Emotion raw:", emotion_raw)
 
-        print("========== HUGGING FACE EMOTION ==========")
-        print("Status:", emotion_response.status_code)
-        print("Response:", emotion_response.text)
-
-        emotion_response.raise_for_status()
-
-        raw = emotion_response.json()
-
-        print("Emotion raw:", raw)
-
-        if isinstance(raw, list) and len(raw) > 0:
-
-            emotions_raw = (
-                raw[0]
-                if isinstance(raw[0], list)
-                else raw
-            )
-
-            raw_scores = [
-                {
-                    "label": e["label"].lower(),
-                    "score": round(e["score"], 4)
-                }
-                for e in emotions_raw
-            ]
-
-            raw_scores.sort(
-                key=lambda x: x["score"],
-                reverse=True
-            )
-
-        else:
-
-            raise ValueError(
-                f"Unexpected Hugging Face emotion response: {raw}"
-            )
+        raw_scores = extract_scores(emotion_raw)
 
     except Exception as e:
 
-        print("Emotion Detection Error:", repr(e))
+        print(
+            "Emotion Detection Error:",
+            repr(e)
+        )
 
         raw_scores = [
             {
@@ -270,148 +513,54 @@ async def detect_text_emotion(text: str = Form(...)):
             }
         ]
 
+    print("Original Emotion Scores:", raw_scores)
+
     # ======================================
     # STEP 3: GROQ CONTEXTUAL REFINEMENT
     # ======================================
 
     try:
 
-        top_5 = raw_scores[:5]
-
-        top_5_str = ", ".join(
-            [
-                f"{e['label']}({int(e['score'] * 100)}%)"
-                for e in top_5
-            ]
+        final_emotions = refine_emotions(
+            text,
+            raw_scores,
+            is_sarcastic
         )
 
-        sarcasm_note = (
-            "The text appears to be sarcastic/ironic."
-            if is_sarcastic else ""
+        print(
+            "Final Refined Emotions:",
+            final_emotions
         )
-
-        prompt = f"""
-You are an emotion detection expert.
-Analyze this text and return corrected emotion scores.
-
-Text: "{text}"
-
-NLP Model detected (top 5): {top_5_str}
-
-{sarcasm_note}
-
-Instructions:
-
-- Consider the full context and meaning.
-- If sarcastic, adjust emotions accordingly.
-- Return ONLY a JSON array of top 7 emotions with corrected scores.
-- Use only these labels:
-
-admiration, amusement, anger, annoyance, approval, caring,
-confusion, curiosity, desire, disappointment, disapproval,
-disgust, embarrassment, excitement, fear, gratitude, grief,
-joy, love, nervousness, neutral, optimism, pride, realization,
-relief, remorse, sadness, surprise
-
-- Scores must sum to 1.0.
-- For Monday/work frustration, prefer annoyance over disapproval.
-- For passive aggressive statements, prefer annoyance.
-- Return ONLY valid JSON array.
-- No markdown.
-- No explanation.
-
-Example:
-
-[
-    {{"label": "fear", "score": 0.85}},
-    {{"label": "nervousness", "score": 0.10}},
-    {{"label": "surprise", "score": 0.05}}
-]
-"""
-
-        groq_text = call_groq(
-            prompt=prompt,
-
-            system_prompt=(
-                "You are an emotion detection expert. "
-                "Always respond with valid JSON array only, "
-                "no explanation."
-            ),
-
-            max_tokens=500,
-            temperature=0.1
-        )
-
-        # Clean JSON response
-        groq_text = (
-            groq_text
-            .replace("```json", "")
-            .replace("```", "")
-            .strip()
-        )
-
-        print("Groq parsed:", groq_text)
-
-        final_emotions = json.loads(groq_text)
-
-        if not isinstance(final_emotions, list) or not final_emotions:
-            raise ValueError("Groq returned invalid emotion array.")
-
-        # Validate labels and scores
-        allowed_labels = {
-            "admiration", "amusement", "anger", "annoyance",
-            "approval", "caring", "confusion", "curiosity",
-            "desire", "disappointment", "disapproval", "disgust",
-            "embarrassment", "excitement", "fear", "gratitude",
-            "grief", "joy", "love", "nervousness", "neutral",
-            "optimism", "pride", "realization", "relief",
-            "remorse", "sadness", "surprise"
-        }
-
-        for emotion in final_emotions:
-
-            if emotion["label"].lower() not in allowed_labels:
-                raise ValueError(
-                    f"Invalid emotion label: {emotion['label']}"
-                )
-
-            emotion["label"] = emotion["label"].lower()
-            emotion["score"] = float(emotion["score"])
-
-            if not 0 <= emotion["score"] <= 1:
-                raise ValueError("Invalid emotion score.")
-
-        final_emotions.sort(
-            key=lambda x: x["score"],
-            reverse=True
-        )
-
-        print("Final emotions:", final_emotions)
-
-        return {
-            "text": text,
-            "emotions": [final_emotions],
-            "is_sarcastic": is_sarcastic
-        }
 
     except Exception as e:
 
-        print("Groq Emotion Refinement Error:", repr(e))
+        print(
+            "Groq Emotion Refinement Error:",
+            repr(e)
+        )
 
-        # Fallback to original NLP model scores
-        return {
-            "text": text,
-            "emotions": [raw_scores],
-            "is_sarcastic": is_sarcastic
-        }
+        # Fallback to Hugging Face results
+        final_emotions = raw_scores
+
+    # ======================================
+    # FINAL RESPONSE
+    # ======================================
+
+    return {
+        "text": text,
+        "emotions": [final_emotions],
+        "is_sarcastic": is_sarcastic
+    }
 
 
 # ==========================================
-# AI EMPATHETIC RESPONSE GENERATION
+# STEP 2: EMPATHETIC AI RESPONSE
 # ==========================================
 
 @app.post("/generate-ai-response")
-async def generate_ai_response(emotion: str = Form(...)):
+async def generate_ai_response(
+    emotion: str = Form(...)
+):
 
     try:
 
@@ -422,14 +571,19 @@ async def generate_ai_response(emotion: str = Form(...)):
 
             system_prompt=(
                 "You are a compassionate emotional support assistant. "
-                "Give warm, empathetic responses in 2-3 sentences."
+                "Give warm, empathetic responses in 2-3 sentences. "
+                "Be natural, supportive and non-judgmental."
             ),
 
-            max_tokens=200,
-            temperature=0.7
+            max_tokens=300,
+            temperature=0.7,
+            json_mode=False
         )
 
-        print("AI Generated Response:", ai_text)
+        print(
+            "AI Generated Response:",
+            ai_text
+        )
 
         return {
             "response": ai_text
@@ -437,7 +591,10 @@ async def generate_ai_response(emotion: str = Form(...)):
 
     except Exception as e:
 
-        print("AI Response Error:", repr(e))
+        print(
+            "AI Response Error:",
+            repr(e)
+        )
 
         return {
             "response": "Could not generate response."
@@ -450,9 +607,13 @@ async def generate_ai_response(emotion: str = Form(...)):
 
 def when_emotion_prompt(emotion: str) -> str:
 
-    emotion = emotion.lower()
+    emotion = emotion.lower().strip()
 
-    if emotion in ["joy", "excitement", "admiration"]:
+    if emotion in [
+        "joy",
+        "excitement",
+        "admiration"
+    ]:
 
         return (
             f"The user is feeling {emotion}. "
@@ -461,7 +622,12 @@ def when_emotion_prompt(emotion: str) -> str:
             "this positive energy."
         )
 
-    elif emotion in ["sadness", "grief", "disappointment", "remorse"]:
+    elif emotion in [
+        "sadness",
+        "grief",
+        "disappointment",
+        "remorse"
+    ]:
 
         return (
             f"The user is feeling {emotion}. "
@@ -469,7 +635,11 @@ def when_emotion_prompt(emotion: str) -> str:
             "in 2-3 sentences. Suggest one gentle positive reframe."
         )
 
-    elif emotion in ["anger", "annoyance", "disapproval"]:
+    elif emotion in [
+        "anger",
+        "annoyance",
+        "disapproval"
+    ]:
 
         return (
             f"The user is feeling {emotion}. "
@@ -478,7 +648,10 @@ def when_emotion_prompt(emotion: str) -> str:
             "this energy positively."
         )
 
-    elif emotion in ["fear", "nervousness"]:
+    elif emotion in [
+        "fear",
+        "nervousness"
+    ]:
 
         return (
             f"The user is feeling {emotion}. "
@@ -494,7 +667,10 @@ def when_emotion_prompt(emotion: str) -> str:
             "in 2-3 sentences."
         )
 
-    elif emotion in ["love", "caring"]:
+    elif emotion in [
+        "love",
+        "caring"
+    ]:
 
         return (
             f"The user is feeling {emotion}. "
